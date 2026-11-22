@@ -1,0 +1,71 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Folder Back Plate -->
+    <path
+        android:pathData="M28,42 C28,38 30,35 34,35 L46,35 C49,35 51,37 53,40 L54,41 C55,42 57,42 59,42 L76,42 C78.5,42 80,43.5 80,46 L80,72 C80,75 78,76.5 75.5,76.5 L32.5,76.5 C30,76.5 28,75 28,72 Z"
+        android:fillColor="#55FFFFFF" />
+
+    <!-- Secondary Document Sheet -->
+    <path
+        android:pathData="M34,32 C34,29.5 35.5,28 37.5,28 L55,28 C57,28 58.5,29.5 58.5,31.5 L58.5,56 L34,56 Z"
+        android:fillColor="#33FFFFFF" />
+
+    <!-- Primary Document Sheet -->
+    <path
+        android:pathData="M43,25 L63,25 L71,33 L71,60 L41,60 L41,27 C41,25.8 41.8,25 43,25 Z"
+        android:fillColor="#D9FFFFFF" />
+
+    <!-- Dog-Ear Fold -->
+    <path
+        android:pathData="M63,25 L63,33 L71,33 Z"
+        android:fillColor="#80FFFFFF" />
+
+    <!-- Document Lines -->
+    <path
+        android:pathData="M46,32 L56,32 M46,38 L65,38 M46,43 L62,43"
+        android:strokeColor="#66000000"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+
+    <!-- Folder Front Flap -->
+    <path
+        android:pathData="M30,46 L78,46 C80.2,46 81.5,47.8 81.5,50 L81.5,72 C81.5,75.3 78.8,78 75.5,78 L32.5,78 C29.2,78 26.5,75.3 26.5,72 L26.5,50 C26.5,47.8 27.8,46 30,46 Z"
+        android:fillColor="#99FFFFFF" />
+
+    <!-- File System Directory Hierarchy Tree Motif (Solid Highlight) -->
+    <path
+        android:pathData="M41,56.5 L41,69 M41,62 L52,62 M55.5,62 L63.5,62 M41,69 L52,69 M55.5,69 L63.5,69"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round" />
+
+    <!-- Root Directory Node -->
+    <path
+        android:pathData="M41,52.5 A2.8,2.8 0 1,0 41,58.1 A2.8,2.8 0 1,0 41,52.5 Z"
+        android:fillColor="#FFFFFFFF" />
+
+    <!-- Subdirectory Node 1 -->
+    <path
+        android:pathData="M53.5,59.8 A2.2,2.2 0 1,0 53.5,64.2 A2.2,2.2 0 1,0 53.5,59.8 Z"
+        android:fillColor="#FFFFFFFF" />
+
+    <!-- Leaf File Node 1 -->
+    <path
+        android:pathData="M65,60.5 A1.6,1.6 0 1,0 65,63.7 A1.6,1.6 0 1,0 65,60.5 Z"
+        android:fillColor="#FFFFFFFF" />
+
+    <!-- Subdirectory Node 2 -->
+    <path
+        android:pathData="M53.5,66.8 A2.2,2.2 0 1,0 53.5,71.2 A2.2,2.2 0 1,0 53.5,66.8 Z"
+        android:fillColor="#FFFFFFFF" />
+
+    <!-- Leaf File Node 2 -->
+    <path
+        android:pathData="M65,67.4 A1.6,1.6 0 1,0 65,70.6 A1.6,1.6 0 1,0 65,67.4 Z"
+        android:fillColor="#FFFFFFFF" />
+
+</vector>
