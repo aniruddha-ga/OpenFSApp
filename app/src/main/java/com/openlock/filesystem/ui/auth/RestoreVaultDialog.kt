@@ -2,6 +2,8 @@ package com.openlock.filesystem.ui.auth
 
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -87,7 +89,10 @@ fun RestoreVaultDialog(
         onDismissRequest = { if (!isRestoring) onDismiss() },
         title = { Text("Restore Encrypted Vault") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
