@@ -25,6 +25,7 @@ class VaultTaskService : Service() {
 
         when (action) {
             ACTION_START, ACTION_UPDATE -> {
+                isTaskRunning = true
                 val notification = buildNotification(title, message, currentBytes, totalBytes)
                 startForeground(
                     NOTIFICATION_ID,
@@ -33,10 +34,12 @@ class VaultTaskService : Service() {
                 )
             }
             ACTION_STOP -> {
+                isTaskRunning = false
                 val completionTitle = intent?.getStringExtra(EXTRA_TITLE) ?: "Vault Operation Complete"
                 val completionMessage = intent?.getStringExtra(EXTRA_MESSAGE) ?: "Task finished successfully"
                 showCompletionNotification(completionTitle, completionMessage)
                 stopForeground(STOP_FOREGROUND_DETACH)
+                onTaskFinishedListener?.invoke()
                 stopSelf()
             }
         }
@@ -115,7 +118,13 @@ class VaultTaskService : Service() {
         const val EXTRA_CURRENT_BYTES = "extra_current_bytes"
         const val EXTRA_TOTAL_BYTES = "extra_total_bytes"
 
+        @Volatile
+        var isTaskRunning: Boolean = false
+
+        var onTaskFinishedListener: (() -> Unit)? = null
+
         fun start(context: Context, title: String, message: String, totalBytes: Long = 0L) {
+            isTaskRunning = true
             try {
                 val intent = Intent(context, VaultTaskService::class.java).apply {
                     action = ACTION_START
@@ -148,6 +157,16 @@ class VaultTaskService : Service() {
                     putExtra(EXTRA_MESSAGE, message)
                 }
                 context.startService(intent)
+            } catch (_: Exception) {}
+        }
+
+        fun clearAllNotifications(context: Context) {
+            try {
+                isTaskRunning = false
+                val manager = context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                manager.cancelAll()
+                val intent = Intent(context, VaultTaskService::class.java)
+                context.stopService(intent)
             } catch (_: Exception) {}
         }
 

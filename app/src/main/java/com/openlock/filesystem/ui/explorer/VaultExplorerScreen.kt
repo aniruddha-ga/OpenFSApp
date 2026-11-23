@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -510,10 +509,10 @@ fun VaultExplorerScreen(
                     if (isSelectionMode) {
                         val currentFolderItems = itemsState.value
                         IconButton(onClick = {
-                            if (selectedItemIds.size == currentFolderItems.size) {
-                                selectedItemIds = emptySet()
+                            selectedItemIds = if (selectedItemIds.size == currentFolderItems.size) {
+                                emptySet()
                             } else {
-                                selectedItemIds = currentFolderItems.map { it.id }.toSet()
+                                currentFolderItems.map { it.id }.toSet()
                             }
                         }) {
                             Icon(Icons.Default.SelectAll, contentDescription = "Select All")

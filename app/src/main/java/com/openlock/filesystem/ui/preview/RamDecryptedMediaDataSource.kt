@@ -98,6 +98,7 @@ class RamDecryptedMediaDataSource(
             randomAccessFile.readFully(meta)
             val metaBuffer = ByteBuffer.wrap(meta)
             val index = metaBuffer.int
+            val plaintextSize = metaBuffer.int
             val ciphertextSize = metaBuffer.int
 
             val cipherText = ByteArray(ciphertextSize)
@@ -107,6 +108,9 @@ class RamDecryptedMediaDataSource(
             val cipher = Cipher.getInstance(ObfuscatedStrings.AES_GCM_CIPHER)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(128, chunkIv))
             val plainText = cipher.doFinal(cipherText)
+            require(plainText.size == plaintextSize) {
+                "Decrypted size mismatch in chunk $index: expected $plaintextSize, got ${plainText.size}"
+            }
 
             // Cache in RAM
             ramChunkCache[chunkIndex] = plainText

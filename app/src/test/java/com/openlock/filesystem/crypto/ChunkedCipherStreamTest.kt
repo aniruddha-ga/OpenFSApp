@@ -111,4 +111,35 @@ class ChunkedCipherStreamTest {
             // Success: GCM tag integrity check caught tampering
         }
     }
+
+    @Test
+    fun testRamDecryptedMediaDataSourceReadsCorrectly() {
+        val masterKey = KeyManager.generateRandomKey()
+        // 150 KB payload spanning multiple 64 KB chunks
+        val originalBytes = ByteArray(150 * 1024)
+        SecureRandom().nextBytes(originalBytes)
+
+        val tempFile = java.io.File.createTempFile("test_enc", ".tmp")
+        try {
+            tempFile.outputStream().use { outStream ->
+                ChunkedCipherStream.encrypt(
+                    inputStream = ByteArrayInputStream(originalBytes),
+                    outputStream = outStream,
+                    secretKey = masterKey
+                )
+            }
+
+            val dataSource = com.openlock.filesystem.ui.preview.RamDecryptedMediaDataSource(tempFile, masterKey)
+            assertEquals(originalBytes.size.toLong(), dataSource.size)
+
+            val buffer = ByteArray(originalBytes.size)
+            val readBytes = dataSource.readAt(0, buffer, 0, buffer.size)
+
+            assertEquals(originalBytes.size, readBytes)
+            assertArrayEquals(originalBytes, buffer)
+            dataSource.close()
+        } finally {
+            tempFile.delete()
+        }
+    }
 }

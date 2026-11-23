@@ -10,6 +10,7 @@ import androidx.security.crypto.MasterKey
 import com.openlock.filesystem.crypto.KeyManager
 import com.openlock.filesystem.data.SingleFileContainerManager
 import com.openlock.filesystem.data.VaultRepository
+import com.openlock.filesystem.data.VaultTaskService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,6 +56,16 @@ class AuthManager(context: Context) {
     // Session-level flag to ensure shred confirmation warning pops up at most ONCE per session
     @Volatile
     var hasPromptedShredWarningInSession: Boolean = false
+
+    // Flag indicating that a full vault lock is pending completion of an active background task
+    @Volatile
+    var isLockPendingAfterTask: Boolean = false
+
+    init {
+        VaultTaskService.onTaskFinishedListener = {
+            onTaskCompleted()
+        }
+    }
 
     // App Lock (UI) state - ALWAYS starts locked so App Lock Screen shows first!
     private val _isAppUnlocked = MutableStateFlow(false)
@@ -459,16 +470,32 @@ class AuthManager(context: Context) {
 
     fun lock() {
         hasPromptedShredWarningInSession = false
-        if (isAppLockSetup()) {
-            _isAppUnlocked.value = false
+        _isAppUnlocked.value = false
+
+        if (VaultTaskService.isTaskRunning) {
+            isLockPendingAfterTask = true
+            Log.d("AuthManager", "App backgrounded/minimized during active task. UI locked; deferring container session close until task completes.")
         } else {
-            _isAppUnlocked.value = false
+            performFullVaultLock()
         }
+    }
+
+    fun performFullVaultLock() {
+        isLockPendingAfterTask = false
         if (hasAnyVaultSetup()) {
             containerManager.closeSession()
             val tempCacheDir = File(appContext.cacheDir, "vault_tmp")
             if (tempCacheDir.exists()) tempCacheDir.deleteRecursively()
             _vaultState.value = VaultSessionState.Locked
+        }
+    }
+
+    fun onTaskCompleted() {
+        if (isLockPendingAfterTask || !_isAppUnlocked.value) {
+            Log.d("AuthManager", "Background operation task completed while app locked/minimized. Performing full vault lock.")
+            performFullVaultLock()
+        } else {
+            containerManager.syncContainerState()
         }
     }
 

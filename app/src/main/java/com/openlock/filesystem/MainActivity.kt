@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.biometric.BiometricPrompt
@@ -20,7 +21,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
@@ -36,6 +36,7 @@ import androidx.navigation.navArgument
 import com.openlock.filesystem.auth.AuthManager
 import com.openlock.filesystem.auth.VaultSessionState
 import com.openlock.filesystem.data.VaultRepository
+import com.openlock.filesystem.data.VaultTaskService
 import com.openlock.filesystem.ui.auth.AuthScreen
 import com.openlock.filesystem.ui.auth.CreateVaultDialog
 import com.openlock.filesystem.ui.auth.RestoreVaultDialog
@@ -45,7 +46,6 @@ import com.openlock.filesystem.ui.preview.FilePreviewScreen
 import com.openlock.filesystem.ui.settings.SettingsScreen
 import com.openlock.filesystem.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 
 class MainActivity : FragmentActivity() {
@@ -85,6 +85,14 @@ class MainActivity : FragmentActivity() {
         authManager = AuthManager(applicationContext)
         vaultRepository = VaultRepository(applicationContext)
 
+        // Handle Back Press Exit: Clear notifications when exiting via back press
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                VaultTaskService.clearAllNotifications(applicationContext)
+                finish()
+            }
+        })
+
         setContent {
             MyApplicationTheme {
                 Surface(
@@ -117,6 +125,13 @@ class MainActivity : FragmentActivity() {
         if (!authManager.isPickingFile) {
             vaultRepository.clearTempPreviewCache()
             authManager.lock()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing) {
+            VaultTaskService.clearAllNotifications(applicationContext)
         }
     }
 }
