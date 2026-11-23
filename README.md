@@ -33,7 +33,8 @@
 
 ### 5. Secure File Explorer & Management
 - **Hierarchical Directory Tree:** Full support for nested sub-folders, breadcrumb path navigation, file creation, item renaming, and recursive folder deletion.
-- **Universal SAF Import:** Import files of any format (documents, images, videos, audio, PDFs, archives) via standard Android document pickers.
+- **Recursive SAF Folder Import:** Import entire directory trees from device storage via `ACTION_OPEN_DOCUMENT_TREE`. All nested sub-folders are recreated in the vault with 1:1 hierarchy preservation while streaming-encrypting every contained file.
+- **Universal SAF File Import:** Import individual or multiple files of any format (documents, images, videos, audio, PDFs, archives) via standard Android document pickers.
 - **Search & Pull-to-Refresh:** Real-time in-vault item search and pull-to-refresh container synchronization.
 
 ### 6. Ephemeral In-RAM Media & Document Previewer

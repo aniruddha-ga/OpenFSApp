@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import androidx.documentfile.provider.DocumentFile
 import com.openlock.filesystem.crypto.ChunkedCipherStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -16,6 +17,13 @@ import java.io.IOException
 import java.io.InputStream
 import java.util.UUID
 import javax.crypto.SecretKey
+
+data class FolderImportResult(
+    val rootFolderName: String,
+    val filesImported: Int,
+    val foldersCreated: Int,
+    val failedFiles: Int
+)
 
 class VaultRepository(
     private val context: Context,
@@ -180,6 +188,82 @@ class VaultRepository(
             }
         }
         return Pair(successCount, failCount)
+    }
+
+    suspend fun importFolder(
+        treeUri: Uri,
+        targetParentFolderId: String?,
+        masterKey: SecretKey,
+        onProgressUpdate: ((currentFile: String, filesImported: Int) -> Unit)? = null
+    ): FolderImportResult {
+        return withContext(Dispatchers.IO) {
+            val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
+                ?: throw IOException("Unable to access directory at URI: $treeUri")
+
+            val rootName = rootDoc.name?.takeIf { it.isNotBlank() } ?: "ImportedFolder"
+
+            var filesImportedCount = 0
+            var foldersCreatedCount = 0
+            var failedFilesCount = 0
+
+            suspend fun processDirectoryContents(dir: DocumentFile, currentVaultParentId: String?) {
+                val children = dir.listFiles()
+                for (child in children) {
+                    if (child.isDirectory) {
+                        val subFolderName = child.name?.takeIf { it.isNotBlank() } ?: "Folder"
+                        val subFolderEntity = VaultItemEntity(
+                            id = UUID.randomUUID().toString(),
+                            parentFolderId = currentVaultParentId?.ifEmpty { null },
+                            name = subFolderName,
+                            mimeType = "inode/directory",
+                            sizeBytes = 0L,
+                            isFolder = true,
+                            createdAtEpochMs = System.currentTimeMillis(),
+                            physicalFileName = ""
+                        )
+                        vaultDao.insertItem(subFolderEntity)
+                        foldersCreatedCount++
+                        processDirectoryContents(child, subFolderEntity.id)
+                    } else if (child.isFile) {
+                        try {
+                            val fileName = child.name ?: "imported_file_${System.currentTimeMillis()}"
+                            onProgressUpdate?.invoke(fileName, filesImportedCount)
+                            importFile(child.uri, currentVaultParentId, masterKey)
+                            filesImportedCount++
+                        } catch (e: Exception) {
+                            Log.e("VaultRepository", "Failed to import file in folder: ${child.uri}", e)
+                            failedFilesCount++
+                        }
+                    }
+                }
+            }
+
+            // Create root folder entry in vault Room DB
+            val rootFolderEntity = VaultItemEntity(
+                id = UUID.randomUUID().toString(),
+                parentFolderId = targetParentFolderId?.ifEmpty { null },
+                name = rootName,
+                mimeType = "inode/directory",
+                sizeBytes = 0L,
+                isFolder = true,
+                createdAtEpochMs = System.currentTimeMillis(),
+                physicalFileName = ""
+            )
+            vaultDao.insertItem(rootFolderEntity)
+            foldersCreatedCount++
+
+            // Recursively import contents of selected folder into rootFolderEntity
+            processDirectoryContents(rootDoc, rootFolderEntity.id)
+
+            containerManager.syncContainerState()
+
+            FolderImportResult(
+                rootFolderName = rootName,
+                filesImported = filesImportedCount,
+                foldersCreated = foldersCreatedCount,
+                failedFiles = failedFilesCount
+            )
+        }
     }
 
     suspend fun exportFile(itemId: String, destinationUri: Uri, masterKey: SecretKey) {

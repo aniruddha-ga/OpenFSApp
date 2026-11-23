@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFolderUpload
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Folder
@@ -249,6 +250,43 @@ fun VaultExplorerScreen(
         }
     }
 
+    var importProgressText by remember { mutableStateOf("Encrypting & Importing... Please wait.") }
+
+    fun processSelectedFolderUri(treeUri: Uri) {
+        Toast.makeText(context, "Starting folder import...", Toast.LENGTH_SHORT).show()
+        isImporting = true
+        importProgressText = "Parsing folder structure & encrypting files..."
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                Log.d("VaultImport", "Starting folder import for URI: $treeUri")
+                val result = vaultRepository.importFolder(
+                    treeUri = treeUri,
+                    targetParentFolderId = currentFolderId,
+                    masterKey = masterKey,
+                    onProgressUpdate = { fileName, count ->
+                        importProgressText = "Encrypting file #${count + 1}: $fileName"
+                    }
+                )
+                withContext(Dispatchers.Main) {
+                    isImporting = false
+                    val msg = "Imported folder '${result.rootFolderName}' (${result.filesImported} files, ${result.foldersCreated} folders)"
+                    Log.d("VaultImport", msg)
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    snackbarHostState.showSnackbar(msg)
+                }
+            } catch (e: Exception) {
+                Log.e("VaultImport", "Folder import exception for URI $treeUri", e)
+                withContext(Dispatchers.Main) {
+                    isImporting = false
+                    val errorMsg = "Folder import failed: ${e.localizedMessage ?: e.toString()}"
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                    snackbarHostState.showSnackbar(errorMsg)
+                }
+            }
+        }
+    }
+
     // Unified Document Picker Launcher using ACTION_OPEN_DOCUMENT + CATEGORY_OPENABLE
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = OpenAnyDocumentContract()
@@ -257,7 +295,16 @@ fun VaultExplorerScreen(
         processSelectedUris(uris)
     }
 
+    // SAF Document Tree Picker Launcher for Folder Import
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        Log.d("VaultImport", "OpenDocumentTree returned URI: $treeUri")
+        treeUri?.let { processSelectedFolderUri(it) }
+    }
+
     var pendingImportOnPermission by remember { mutableStateOf(false) }
+    var pendingFolderImportOnPermission by remember { mutableStateOf(false) }
 
     // Permission Launcher for Storage/Media Access
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -274,6 +321,16 @@ fun VaultExplorerScreen(
                     snackbarHostState.showSnackbar("Storage/Media permission is required to select files")
                 }
             }
+        } else if (pendingFolderImportOnPermission) {
+            pendingFolderImportOnPermission = false
+            if (hasAnyGranted) {
+                folderPickerLauncher.launch(null)
+            } else {
+                Toast.makeText(context, "Storage/Media permission denied", Toast.LENGTH_LONG).show()
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Storage/Media permission is required to select folders")
+                }
+            }
         }
     }
 
@@ -286,6 +343,19 @@ fun VaultExplorerScreen(
             filePickerLauncher.launch(Unit)
         } else {
             pendingImportOnPermission = true
+            permissionLauncher.launch(requiredPermissions)
+        }
+    }
+
+    fun launchFolderImportPicker() {
+        val allGranted = requiredPermissions.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        authManager?.isPickingFile = true
+        if (allGranted || Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            folderPickerLauncher.launch(null)
+        } else {
+            pendingFolderImportOnPermission = true
             permissionLauncher.launch(requiredPermissions)
         }
     }
@@ -390,6 +460,14 @@ fun VaultExplorerScreen(
                         leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null) }
                     )
                     DropdownMenuItem(
+                        text = { Text("Import Folder") },
+                        onClick = {
+                            fabMenuExpanded = false
+                            launchFolderImportPicker()
+                        },
+                        leadingIcon = { Icon(Icons.Default.DriveFolderUpload, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
                         text = { Text("New Folder") },
                         onClick = {
                             fabMenuExpanded = false
@@ -421,7 +499,7 @@ fun VaultExplorerScreen(
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         Spacer(modifier = Modifier.width(16.dp))
                         Text(
-                            text = "Encrypting & Importing file(s)... Please wait.",
+                            text = importProgressText,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
