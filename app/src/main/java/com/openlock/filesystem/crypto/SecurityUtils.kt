@@ -134,4 +134,30 @@ object SecurityUtils {
     fun wipeMemory(chars: CharArray) {
         java.util.Arrays.fill(chars, '\u0000')
     }
+
+    /**
+     * Returns all runtime permissions declared in AndroidManifest.xml for the device's Android SDK version.
+     */
+    fun getRequiredManifestPermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            arrayOf(
+                android.Manifest.permission.READ_MEDIA_IMAGES,
+                android.Manifest.permission.READ_MEDIA_VIDEO,
+                android.Manifest.permission.READ_MEDIA_AUDIO,
+                android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                android.Manifest.permission.READ_MEDIA_IMAGES,
+                android.Manifest.permission.READ_MEDIA_VIDEO,
+                android.Manifest.permission.READ_MEDIA_AUDIO,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            )
+        } else {
+            arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            )
+        }
+    }
 }

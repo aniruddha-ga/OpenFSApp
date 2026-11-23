@@ -22,10 +22,10 @@ abstract class VaultDatabase : RoomDatabase() {
                     VaultDatabase::class.java,
                     "openlock_vault_db"
                 )
-                .setQueryCallback({ sqlQuery, bindArgs ->
-                    Log.d("VaultSQL_Exec", "SQL Exec: $sqlQuery | Args: $bindArgs")
-                }, Executors.newSingleThreadExecutor())
-                .fallbackToDestructiveMigration()
+                    .setQueryCallback({ sqlQuery, bindArgs ->
+                        Log.d("VaultSQL_Exec", "SQL Exec: $sqlQuery | Args: $bindArgs")
+                    }, Executors.newSingleThreadExecutor())
+                    .fallbackToDestructiveMigration(false)
                 .build()
 
                 INSTANCE = instance

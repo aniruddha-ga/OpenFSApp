@@ -135,6 +135,21 @@ fun OpenLockApp(
     var showCreateVaultDialog by remember { mutableStateOf(false) }
     var selectedRestoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
+    // Ask for all Manifest runtime permissions on first launch
+    val requiredPermissions = remember { com.openlock.filesystem.crypto.SecurityUtils.getRequiredManifestPermissions() }
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> }
+
+    LaunchedEffect(Unit) {
+        val allGranted = requiredPermissions.all {
+            ContextCompat.checkSelfPermission(activity, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (!allGranted) {
+            permissionLauncher.launch(requiredPermissions)
+        }
+    }
+
     // Folder navigation path stack: List of Pair(folderId, folderName)
     var folderPathStack by remember {
         mutableStateOf(listOf<Pair<String?, String>>(null to "Open FS"))

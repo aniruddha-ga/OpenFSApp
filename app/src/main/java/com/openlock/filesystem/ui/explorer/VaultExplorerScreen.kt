@@ -1,6 +1,5 @@
 package com.openlock.filesystem.ui.explorer
 
-import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -14,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,21 +28,27 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFolderUpload
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -78,6 +84,7 @@ import androidx.core.content.ContextCompat
 import com.openlock.filesystem.auth.AuthManager
 import com.openlock.filesystem.data.VaultItemEntity
 import com.openlock.filesystem.data.VaultRepository
+import com.openlock.filesystem.data.VaultTaskService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -142,9 +149,19 @@ fun VaultExplorerScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
 
-    // System Back Press Handler: Step back to parent folder if inside a subfolder or cancel search
-    BackHandler(enabled = isSearchActive || folderPath.size > 1) {
-        if (isSearchActive) {
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedItemIds by remember { mutableStateOf(setOf<String>()) }
+    var itemsToExportToDir by remember { mutableStateOf<List<String>?>(null) }
+    var isExporting by remember { mutableStateOf(false) }
+    var exportProgressText by remember { mutableStateOf("Exporting items...") }
+    var showBatchDeleteDialog by remember { mutableStateOf(false) }
+
+    // System Back Press Handler: Step back to parent folder if inside a subfolder, cancel search, or exit selection mode
+    BackHandler(enabled = isSearchActive || isSelectionMode || folderPath.size > 1) {
+        if (isSelectionMode) {
+            isSelectionMode = false
+            selectedItemIds = emptySet()
+        } else if (isSearchActive) {
             isSearchActive = false
             searchQuery = ""
         } else if (folderPath.size > 1) {
@@ -174,24 +191,7 @@ fun VaultExplorerScreen(
     var pendingShredConfirmationUris by remember { mutableStateOf<List<Uri>?>(null) }
 
     // Required Storage & Media permissions for current Android SDK version
-    val requiredPermissions = remember {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                Manifest.permission.READ_MEDIA_AUDIO,
-                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
-            )
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                Manifest.permission.READ_MEDIA_AUDIO
-            )
-        } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-    }
+    val requiredPermissions = remember { com.openlock.filesystem.crypto.SecurityUtils.getRequiredManifestPermissions() }
 
     fun executeFileImport(uris: List<Uri>, shredSource: Boolean) {
         if (uris.isEmpty()) {
@@ -202,41 +202,49 @@ fun VaultExplorerScreen(
         Toast.makeText(context, "Selected ${uris.size} file(s). Starting import...", Toast.LENGTH_SHORT).show()
         isImporting = true
 
+        VaultTaskService.start(context, "Importing Files", "Encrypting and importing payload...")
+
         // Execute import on IO scope so it is NOT canceled when Activity resumes from File Picker
         CoroutineScope(Dispatchers.IO).launch {
             var successCount = 0
             val errors = mutableListOf<String>()
 
-            if (uris.size > 1) {
-                val (succ, fail) = vaultRepository.importFiles(uris, currentFolderId, masterKey, shredSource = shredSource)
-                successCount = succ
-                if (fail > 0) {
-                    errors.add("$fail file(s) failed during batch import.")
-                }
-            } else {
-                for (uri in uris) {
-                    try {
-                        Log.d("VaultImport", "Starting import for URI: $uri")
-                        val importedItem = vaultRepository.importFile(uri, currentFolderId, masterKey, shredSource = shredSource)
-                        successCount++
-                        Log.d("VaultImport", "Successfully imported file: ${importedItem.name} (id: ${importedItem.id})")
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(
-                                context,
-                                "Successfully imported '${importedItem.name}' (${formatFileSize(importedItem.sizeBytes)})" +
-                                        if (shredSource) " (source shredded)" else "",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    } catch (e: Exception) {
-                        val errorMsg = "Failed to import ${uri.lastPathSegment ?: "file"}: ${e.localizedMessage ?: e.toString()}"
-                        errors.add(errorMsg)
-                        Log.e("VaultImport", "File import exception for URI $uri", e)
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+            try {
+                if (uris.size > 1) {
+                    val (succ, fail) = vaultRepository.importFiles(uris, currentFolderId, masterKey, shredSource = shredSource)
+                    successCount = succ
+                    if (fail > 0) {
+                        errors.add("$fail file(s) failed during batch import.")
+                    }
+                } else {
+                    for (uri in uris) {
+                        try {
+                            Log.d("VaultImport", "Starting import for URI: $uri")
+                            val importedItem = vaultRepository.importFile(uri, currentFolderId, masterKey, shredSource = shredSource)
+                            successCount++
+                            VaultTaskService.update(context, "Importing Files", "Encrypting file #$successCount: ${importedItem.name}")
+                            Log.d("VaultImport", "Successfully imported file: ${importedItem.name} (id: ${importedItem.id})")
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(
+                                    context,
+                                    "Successfully imported '${importedItem.name}' (${formatFileSize(importedItem.sizeBytes)})" +
+                                            if (shredSource) " (source shredded)" else "",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        } catch (e: Exception) {
+                            val errorMsg = "Failed to import ${uri.lastPathSegment ?: "file"}: ${e.localizedMessage ?: e.toString()}"
+                            errors.add(errorMsg)
+                            Log.e("VaultImport", "File import exception for URI $uri", e)
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                            }
                         }
                     }
                 }
+                VaultTaskService.stop(context, "File Import Complete", "Imported $successCount file(s)")
+            } catch (e: Exception) {
+                VaultTaskService.stop(context, "File Import Failed", "Error: ${e.message}")
             }
 
             withContext(Dispatchers.Main) {
@@ -354,7 +362,7 @@ fun VaultExplorerScreen(
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
         authManager?.isPickingFile = true
-        if (allGranted || Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (allGranted) {
             filePickerLauncher.launch(Unit)
         } else {
             pendingImportOnPermission = true
@@ -367,7 +375,7 @@ fun VaultExplorerScreen(
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
         authManager?.isPickingFile = true
-        if (allGranted || Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (allGranted) {
             folderPickerLauncher.launch(null)
         } else {
             pendingFolderImportOnPermission = true
@@ -375,12 +383,12 @@ fun VaultExplorerScreen(
         }
     }
 
-    // Automatically check and request missing storage/media permissions on first launch
+    // Automatically check and request missing storage/media/notification permissions on first launch
     LaunchedEffect(Unit) {
         val allGranted = requiredPermissions.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
-        if (!allGranted && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        if (!allGranted) {
             permissionLauncher.launch(requiredPermissions)
         }
     }
@@ -411,12 +419,57 @@ fun VaultExplorerScreen(
         }
     }
 
+    // SAF Directory Export Launcher for Folder & Multi-Select Exports
+    val directoryExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        treeUri?.let { destUri ->
+            val targetIds = itemsToExportToDir
+            if (!targetIds.isNullOrEmpty()) {
+                isExporting = true
+                exportProgressText = "Exporting ${targetIds.size} item(s)... Please wait."
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val (succ, fail) = vaultRepository.exportItemsToDirectory(
+                            itemIds = targetIds,
+                            targetDirUri = destUri,
+                            masterKey = masterKey,
+                            onProgress = { itemName ->
+                                exportProgressText = "Decrypting & exporting: $itemName"
+                            }
+                        )
+                        withContext(Dispatchers.Main) {
+                            isExporting = false
+                            itemsToExportToDir = null
+                            isSelectionMode = false
+                            selectedItemIds = emptySet()
+                            val msg = "Export complete: $succ file(s) exported" + if (fail > 0) ", $fail failed" else ""
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            snackbarHostState.showSnackbar(msg)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("VaultExplorer", "Folder/Batch export failed", e)
+                        withContext(Dispatchers.Main) {
+                            isExporting = false
+                            itemsToExportToDir = null
+                            val errorMsg = "Export failed: ${e.localizedMessage ?: e.toString()}"
+                            Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                            snackbarHostState.showSnackbar(errorMsg)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
-                    if (isSearchActive) {
+                    if (isSelectionMode) {
+                        Text(text = "${selectedItemIds.size} selected")
+                    } else if (isSearchActive) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
@@ -433,7 +486,14 @@ fun VaultExplorerScreen(
                     }
                 },
                 navigationIcon = {
-                    if (currentFolderId != null || isSearchActive) {
+                    if (isSelectionMode) {
+                        IconButton(onClick = {
+                            isSelectionMode = false
+                            selectedItemIds = emptySet()
+                        }) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancel Selection")
+                        }
+                    } else if (currentFolderId != null || isSearchActive) {
                         IconButton(onClick = {
                             if (isSearchActive) {
                                 isSearchActive = false
@@ -447,49 +507,89 @@ fun VaultExplorerScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { isSearchActive = !isSearchActive }) {
-                        Icon(Icons.Default.Search, contentDescription = "Search")
-                    }
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    if (isSelectionMode) {
+                        val currentFolderItems = itemsState.value
+                        IconButton(onClick = {
+                            if (selectedItemIds.size == currentFolderItems.size) {
+                                selectedItemIds = emptySet()
+                            } else {
+                                selectedItemIds = currentFolderItems.map { it.id }.toSet()
+                            }
+                        }) {
+                            Icon(Icons.Default.SelectAll, contentDescription = "Select All")
+                        }
+                        IconButton(
+                            onClick = {
+                                if (selectedItemIds.isNotEmpty()) {
+                                    itemsToExportToDir = selectedItemIds.toList()
+                                    authManager?.isPickingFile = true
+                                    directoryExportLauncher.launch(null)
+                                }
+                            },
+                            enabled = selectedItemIds.isNotEmpty()
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = "Export Selected")
+                        }
+                        IconButton(
+                            onClick = {
+                                if (selectedItemIds.isNotEmpty()) {
+                                    showBatchDeleteDialog = true
+                                }
+                            },
+                            enabled = selectedItemIds.isNotEmpty()
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Selected")
+                        }
+                    } else {
+                        IconButton(onClick = { isSelectionMode = true }) {
+                            Icon(Icons.Default.Checklist, contentDescription = "Select Mode")
+                        }
+                        IconButton(onClick = { isSearchActive = !isSearchActive }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        }
+                        IconButton(onClick = onNavigateToSettings) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
                     }
                 }
             )
         },
         floatingActionButton = {
-            var fabMenuExpanded by remember { mutableStateOf(false) }
-            Box {
-                FloatingActionButton(onClick = { fabMenuExpanded = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add")
-                }
-                DropdownMenu(
-                    expanded = fabMenuExpanded,
-                    onDismissRequest = { fabMenuExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Import File(s)") },
-                        onClick = {
-                            fabMenuExpanded = false
-                            launchFileImportPicker()
-                        },
-                        leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Import Folder") },
-                        onClick = {
-                            fabMenuExpanded = false
-                            launchFolderImportPicker()
-                        },
-                        leadingIcon = { Icon(Icons.Default.DriveFolderUpload, contentDescription = null) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("New Folder") },
-                        onClick = {
-                            fabMenuExpanded = false
-                            showCreateFolderDialog = true
-                        },
-                        leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) }
-                    )
+            if (!isSelectionMode) {
+                var fabMenuExpanded by remember { mutableStateOf(false) }
+                Box {
+                    FloatingActionButton(onClick = { fabMenuExpanded = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "Add")
+                    }
+                    DropdownMenu(
+                        expanded = fabMenuExpanded,
+                        onDismissRequest = { fabMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Import File(s)") },
+                            onClick = {
+                                fabMenuExpanded = false
+                                launchFileImportPicker()
+                            },
+                            leadingIcon = { Icon(Icons.Default.UploadFile, contentDescription = null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Import Folder") },
+                            onClick = {
+                                fabMenuExpanded = false
+                                launchFolderImportPicker()
+                            },
+                            leadingIcon = { Icon(Icons.Default.DriveFolderUpload, contentDescription = null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("New Folder") },
+                            onClick = {
+                                fabMenuExpanded = false
+                                showCreateFolderDialog = true
+                            },
+                            leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) }
+                        )
+                    }
                 }
             }
         }
@@ -518,6 +618,30 @@ fun VaultExplorerScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
+            // Exporting Progress Banner
+            if (isExporting) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = exportProgressText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
                 }
@@ -588,13 +712,32 @@ fun VaultExplorerScreen(
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(items, key = { it.id }) { item ->
+                            val isSelected = selectedItemIds.contains(item.id)
                             VaultItemRow(
                                 item = item,
+                                isSelectionMode = isSelectionMode,
+                                isSelected = isSelected,
                                 onClick = {
-                                    if (item.isFolder) {
+                                    if (isSelectionMode) {
+                                        selectedItemIds = if (isSelected) {
+                                            selectedItemIds - item.id
+                                        } else {
+                                            selectedItemIds + item.id
+                                        }
+                                    } else if (item.isFolder) {
                                         onFolderSelected(item.id, item.name)
                                     } else {
                                         onFilePreviewRequested(item.id)
+                                    }
+                                },
+                                onLongClick = {
+                                    if (!isSelectionMode) {
+                                        isSelectionMode = true
+                                    }
+                                    selectedItemIds = if (isSelected) {
+                                        selectedItemIds - item.id
+                                    } else {
+                                        selectedItemIds + item.id
                                     }
                                 },
                                 onPreview = { onFilePreviewRequested(item.id) },
@@ -602,6 +745,11 @@ fun VaultExplorerScreen(
                                     authManager?.isPickingFile = true
                                     selectedExportItem = item
                                     fileExportLauncher.launch(item.name)
+                                },
+                                onExportFolder = {
+                                    itemsToExportToDir = listOf(item.id)
+                                    authManager?.isPickingFile = true
+                                    directoryExportLauncher.launch(null)
                                 },
                                 onRename = { itemToRename = item },
                                 onDelete = { itemToDelete = item }
@@ -714,6 +862,37 @@ fun VaultExplorerScreen(
         )
     }
 
+    // Batch Delete Dialog
+    if (showBatchDeleteDialog && selectedItemIds.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showBatchDeleteDialog = false },
+            title = { Text("Delete ${selectedItemIds.size} Item(s)") },
+            text = { Text("Are you sure you want to permanently delete the selected ${selectedItemIds.size} item(s)?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val idsToDelete = selectedItemIds.toList()
+                        showBatchDeleteDialog = false
+                        isSelectionMode = false
+                        selectedItemIds = emptySet()
+                        coroutineScope.launch {
+                            for (id in idsToDelete) {
+                                vaultRepository.deleteItem(id)
+                            }
+                        }
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Shred Source File Confirmation Dialog
     pendingShredConfirmationUris?.let { uris ->
         AlertDialog(
@@ -757,9 +936,13 @@ fun VaultExplorerScreen(
 @Composable
 private fun VaultItemRow(
     item: VaultItemEntity,
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onPreview: () -> Unit,
     onExport: () -> Unit,
+    onExportFolder: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -768,10 +951,21 @@ private fun VaultItemRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .combinedClickable(
+                onClick = { onClick() },
+                onLongClick = { onLongClick() }
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isSelectionMode) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onClick() }
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+
         Icon(
             imageVector = if (item.isFolder) Icons.Default.Folder else Icons.AutoMirrored.Filled.InsertDriveFile,
             contentDescription = null,
@@ -797,48 +991,59 @@ private fun VaultItemRow(
             )
         }
 
-        Box {
-            IconButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "Options")
-            }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
-            ) {
-                if (!item.isFolder) {
+        if (!isSelectionMode) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Options")
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    if (item.isFolder) {
+                        DropdownMenuItem(
+                            text = { Text("Export Folder") },
+                            onClick = {
+                                menuExpanded = false
+                                onExportFolder()
+                            },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = null) }
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Preview") },
+                            onClick = {
+                                menuExpanded = false
+                                onPreview()
+                            },
+                            leadingIcon = { Icon(Icons.Default.Visibility, contentDescription = null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Export & Decrypt") },
+                            onClick = {
+                                menuExpanded = false
+                                onExport()
+                            },
+                            leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) }
+                        )
+                    }
                     DropdownMenuItem(
-                        text = { Text("Preview") },
+                        text = { Text("Rename") },
                         onClick = {
                             menuExpanded = false
-                            onPreview()
+                            onRename()
                         },
-                        leadingIcon = { Icon(Icons.Default.Visibility, contentDescription = null) }
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
                     )
                     DropdownMenuItem(
-                        text = { Text("Export & Decrypt") },
+                        text = { Text("Delete") },
                         onClick = {
                             menuExpanded = false
-                            onExport()
+                            onDelete()
                         },
-                        leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) }
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) }
                     )
                 }
-                DropdownMenuItem(
-                    text = { Text("Rename") },
-                    onClick = {
-                        menuExpanded = false
-                        onRename()
-                    },
-                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
-                )
-                DropdownMenuItem(
-                    text = { Text("Delete") },
-                    onClick = {
-                        menuExpanded = false
-                        onDelete()
-                    },
-                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) }
-                )
             }
         }
     }

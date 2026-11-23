@@ -76,13 +76,38 @@ class VaultRepository(
 
     suspend fun exportVaultContainer(vaultName: String, destinationUri: Uri): Boolean {
         return withContext(Dispatchers.IO) {
-            containerManager.exportBackupContainer(context, vaultName, destinationUri)
+            val size = getContainerFileSize(vaultName)
+            VaultTaskService.start(context, "Exporting Vault Container", "Exporting $vaultName.ofs backup...", size)
+            try {
+                val success = containerManager.exportBackupContainer(context, vaultName, destinationUri)
+                if (success) {
+                    VaultTaskService.stop(context, "Container Backup Exported", "$vaultName.ofs exported successfully")
+                } else {
+                    VaultTaskService.stop(context, "Export Failed", "Failed to export $vaultName.ofs backup")
+                }
+                success
+            } catch (e: Exception) {
+                VaultTaskService.stop(context, "Export Failed", "Failed: ${e.message}")
+                throw e
+            }
         }
     }
 
     suspend fun restoreVaultContainer(vaultName: String, sourceUri: Uri): Boolean {
         return withContext(Dispatchers.IO) {
-            containerManager.restoreBackupContainer(context, vaultName, sourceUri)
+            VaultTaskService.start(context, "Restoring Vault Container", "Restoring $vaultName.ofs container...")
+            try {
+                val success = containerManager.restoreBackupContainer(context, vaultName, sourceUri)
+                if (success) {
+                    VaultTaskService.stop(context, "Container Restored", "$vaultName.ofs restored successfully")
+                } else {
+                    VaultTaskService.stop(context, "Restore Failed", "Failed to restore container")
+                }
+                success
+            } catch (e: Exception) {
+                VaultTaskService.stop(context, "Restore Failed", "Failed: ${e.message}")
+                throw e
+            }
         }
     }
 
@@ -285,72 +310,82 @@ class VaultRepository(
         onProgressUpdate: ((currentFile: String, filesImported: Int) -> Unit)? = null
     ): FolderImportResult {
         return withContext(Dispatchers.IO) {
-            val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
-                ?: throw IOException("Unable to access directory at URI: $treeUri")
+            VaultTaskService.start(context, "Importing Folder", "Parsing directory structure...")
+            try {
+                val rootDoc = DocumentFile.fromTreeUri(context, treeUri)
+                    ?: throw IOException("Unable to access directory at URI: $treeUri")
 
-            val rootName = rootDoc.name?.takeIf { it.isNotBlank() } ?: "ImportedFolder"
+                val rootName = rootDoc.name?.takeIf { it.isNotBlank() } ?: "ImportedFolder"
 
-            var filesImportedCount = 0
-            var foldersCreatedCount = 0
-            var failedFilesCount = 0
+                var filesImportedCount = 0
+                var foldersCreatedCount = 0
+                var failedFilesCount = 0
 
-            suspend fun processDirectoryContents(dir: DocumentFile, currentVaultParentId: String?) {
-                val children = dir.listFiles()
-                for (child in children) {
-                    if (child.isDirectory) {
-                        val subFolderName = child.name?.takeIf { it.isNotBlank() } ?: "Folder"
-                        val subFolderEntity = VaultItemEntity(
-                            id = UUID.randomUUID().toString(),
-                            parentFolderId = currentVaultParentId?.ifEmpty { null },
-                            name = subFolderName,
-                            mimeType = "inode/directory",
-                            sizeBytes = 0L,
-                            isFolder = true,
-                            createdAtEpochMs = System.currentTimeMillis(),
-                            physicalFileName = ""
-                        )
-                        vaultDao.insertItem(subFolderEntity)
-                        foldersCreatedCount++
-                        processDirectoryContents(child, subFolderEntity.id)
-                    } else if (child.isFile) {
-                        try {
-                            val fileName = child.name ?: "imported_file_${System.currentTimeMillis()}"
-                            onProgressUpdate?.invoke(fileName, filesImportedCount)
-                            importFile(child.uri, currentVaultParentId, masterKey)
-                            filesImportedCount++
-                        } catch (e: Exception) {
-                            Log.e("VaultRepository", "Failed to import file in folder: ${child.uri}", e)
-                            failedFilesCount++
+                suspend fun processDirectoryContents(dir: DocumentFile, currentVaultParentId: String?) {
+                    val children = dir.listFiles()
+                    for (child in children) {
+                        if (child.isDirectory) {
+                            val subFolderName = child.name?.takeIf { it.isNotBlank() } ?: "Folder"
+                            val subFolderEntity = VaultItemEntity(
+                                id = UUID.randomUUID().toString(),
+                                parentFolderId = currentVaultParentId?.ifEmpty { null },
+                                name = subFolderName,
+                                mimeType = "inode/directory",
+                                sizeBytes = 0L,
+                                isFolder = true,
+                                createdAtEpochMs = System.currentTimeMillis(),
+                                physicalFileName = ""
+                            )
+                            vaultDao.insertItem(subFolderEntity)
+                            foldersCreatedCount++
+                            processDirectoryContents(child, subFolderEntity.id)
+                        } else if (child.isFile) {
+                            try {
+                                val fileName = child.name ?: "imported_file_${System.currentTimeMillis()}"
+                                onProgressUpdate?.invoke(fileName, filesImportedCount)
+                                VaultTaskService.update(context, "Importing Folder", "Encrypting #$filesImportedCount: $fileName")
+                                importFile(child.uri, currentVaultParentId, masterKey)
+                                filesImportedCount++
+                            } catch (e: Exception) {
+                                Log.e("VaultRepository", "Failed to import file in folder: ${child.uri}", e)
+                                failedFilesCount++
+                            }
                         }
                     }
                 }
+
+                // Create root folder entry in vault Room DB
+                val rootFolderEntity = VaultItemEntity(
+                    id = UUID.randomUUID().toString(),
+                    parentFolderId = targetParentFolderId?.ifEmpty { null },
+                    name = rootName,
+                    mimeType = "inode/directory",
+                    sizeBytes = 0L,
+                    isFolder = true,
+                    createdAtEpochMs = System.currentTimeMillis(),
+                    physicalFileName = ""
+                )
+                vaultDao.insertItem(rootFolderEntity)
+                foldersCreatedCount++
+
+                // Recursively import contents of selected folder into rootFolderEntity
+                processDirectoryContents(rootDoc, rootFolderEntity.id)
+
+                containerManager.syncContainerState()
+
+                val result = FolderImportResult(
+                    rootFolderName = rootName,
+                    filesImported = filesImportedCount,
+                    foldersCreated = foldersCreatedCount,
+                    failedFiles = failedFilesCount
+                )
+
+                VaultTaskService.stop(context, "Folder Import Complete", "Imported '${result.rootFolderName}' (${result.filesImported} files)")
+                result
+            } catch (e: Exception) {
+                VaultTaskService.stop(context, "Folder Import Failed", "Error: ${e.message}")
+                throw e
             }
-
-            // Create root folder entry in vault Room DB
-            val rootFolderEntity = VaultItemEntity(
-                id = UUID.randomUUID().toString(),
-                parentFolderId = targetParentFolderId?.ifEmpty { null },
-                name = rootName,
-                mimeType = "inode/directory",
-                sizeBytes = 0L,
-                isFolder = true,
-                createdAtEpochMs = System.currentTimeMillis(),
-                physicalFileName = ""
-            )
-            vaultDao.insertItem(rootFolderEntity)
-            foldersCreatedCount++
-
-            // Recursively import contents of selected folder into rootFolderEntity
-            processDirectoryContents(rootDoc, rootFolderEntity.id)
-
-            containerManager.syncContainerState()
-
-            FolderImportResult(
-                rootFolderName = rootName,
-                filesImported = filesImportedCount,
-                foldersCreated = foldersCreatedCount,
-                failedFiles = failedFilesCount
-            )
         }
     }
 
@@ -366,6 +401,115 @@ class VaultRepository(
                 physicalFile.inputStream().use { inputStream ->
                     ChunkedCipherStream.decrypt(inputStream, outputStream, masterKey)
                 }
+            }
+        }
+    }
+
+    suspend fun exportItemToDirectory(
+        itemId: String,
+        targetDir: DocumentFile,
+        masterKey: SecretKey,
+        onProgress: ((itemName: String) -> Unit)? = null
+    ): Pair<Int, Int> {
+        return withContext(Dispatchers.IO) {
+            val item = vaultDao.getItemById(itemId) ?: return@withContext Pair(0, 1)
+            var successCount = 0
+            var failCount = 0
+
+            suspend fun exportFolderRecursively(folderItem: VaultItemEntity, parentDirDoc: DocumentFile) {
+                val subDirDoc = parentDirDoc.createDirectory(folderItem.name)
+                    ?: throw IOException("Failed to create directory '${folderItem.name}' in destination")
+                val children = vaultDao.getChildrenDirect(folderItem.id)
+                for (child in children) {
+                    if (child.isFolder) {
+                        exportFolderRecursively(child, subDirDoc)
+                    } else {
+                        try {
+                            onProgress?.invoke(child.name)
+                            val mime = child.mimeType.ifEmpty { "application/octet-stream" }
+                            val newFileDoc = subDirDoc.createFile(mime, child.name)
+                                ?: throw IOException("Failed to create file '${child.name}' in target directory")
+                            val physicalFile = File(vaultStorageDir, child.physicalFileName)
+                            if (!physicalFile.exists()) {
+                                throw IOException("Physical encrypted file missing: ${child.name}")
+                            }
+                            context.contentResolver.openOutputStream(newFileDoc.uri)?.use { outputStream ->
+                                physicalFile.inputStream().use { inputStream ->
+                                    ChunkedCipherStream.decrypt(inputStream, outputStream, masterKey)
+                                }
+                            }
+                            successCount++
+                        } catch (e: Exception) {
+                            Log.e("VaultRepository", "Failed to export child file ${child.name}", e)
+                            failCount++
+                        }
+                    }
+                }
+            }
+
+            if (item.isFolder) {
+                try {
+                    exportFolderRecursively(item, targetDir)
+                } catch (e: Exception) {
+                    Log.e("VaultRepository", "Failed to export folder ${item.name}", e)
+                    failCount++
+                }
+            } else {
+                try {
+                    onProgress?.invoke(item.name)
+                    val mime = item.mimeType.ifEmpty { "application/octet-stream" }
+                    val newFileDoc = targetDir.createFile(mime, item.name)
+                        ?: throw IOException("Failed to create file '${item.name}' in target directory")
+                    val physicalFile = File(vaultStorageDir, item.physicalFileName)
+                    if (!physicalFile.exists()) {
+                        throw IOException("Physical encrypted file missing: ${item.name}")
+                    }
+                    context.contentResolver.openOutputStream(newFileDoc.uri)?.use { outputStream ->
+                        physicalFile.inputStream().use { inputStream ->
+                            ChunkedCipherStream.decrypt(inputStream, outputStream, masterKey)
+                        }
+                    }
+                    successCount++
+                } catch (e: Exception) {
+                    Log.e("VaultRepository", "Failed to export file ${item.name}", e)
+                    failCount++
+                }
+            }
+
+            Pair(successCount, failCount)
+        }
+    }
+
+    suspend fun exportItemsToDirectory(
+        itemIds: List<String>,
+        targetDirUri: Uri,
+        masterKey: SecretKey,
+        onProgress: ((itemName: String) -> Unit)? = null
+    ): Pair<Int, Int> {
+        return withContext(Dispatchers.IO) {
+            VaultTaskService.start(context, "Exporting Vault Items", "Preparing export to destination...")
+            try {
+                val targetDirDoc = DocumentFile.fromTreeUri(context, targetDirUri)
+                    ?: throw IOException("Unable to access destination folder: $targetDirUri")
+
+                var totalSuccess = 0
+                var totalFail = 0
+
+                for (itemId in itemIds) {
+                    val (succ, fail) = exportItemToDirectory(itemId, targetDirDoc, masterKey) { name ->
+                        VaultTaskService.update(context, "Exporting Vault Items", "Decrypting: $name")
+                        onProgress?.invoke(name)
+                    }
+                    totalSuccess += succ
+                    totalFail += fail
+                }
+
+                val result = Pair(totalSuccess, totalFail)
+                VaultTaskService.stop(context, "Export Complete", "Exported $totalSuccess file(s)")
+                result
+            } catch (e: Exception) {
+                VaultTaskService.stop(context, "Export Failed", "Error: ${e.message}")
+                throw e
             }
         }
     }
