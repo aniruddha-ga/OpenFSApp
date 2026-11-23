@@ -8,6 +8,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -355,6 +359,7 @@ fun VaultUnlockScreen(
 
     val focusRequester = remember { FocusRequester() }
     val isLockedOut = lockoutSeconds > 0
+    val scrollState = rememberScrollState()
 
     // Autofocus password input field on composition
     LaunchedEffect(isLockedOut) {
@@ -396,153 +401,162 @@ fun VaultUnlockScreen(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .imePadding()
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
+            Column(
                 modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = "Lock Logo",
-                    modifier = Modifier.size(36.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Lock Logo",
+                        modifier = Modifier.size(36.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = title ?: if (isLockedOut) "Vault Locked Out" else "Unlock Encrypted Vault",
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center
                 )
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-            Text(
-                text = title ?: if (isLockedOut) "Vault Locked Out" else "Unlock Encrypted Vault",
-                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onBackground,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    text = subtitle ?: if (isLockedOut) "Too many incorrect attempts. Please wait."
+                    else "Enter your master password to unlock this encrypted file vault.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
 
-            Spacer(modifier = Modifier.height(6.dp))
+                // Vault File Selector / Switcher if existing vault files are present
+                if (selectedVaultName != null && availableVaults.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box {
+                        OutlinedButton(onClick = { showVaultMenu = true }) {
+                            Icon(Icons.Default.FolderZip, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Vault File: $selectedVaultName.ofs")
+                        }
 
-            Text(
-                text = subtitle ?: if (isLockedOut) "Too many incorrect attempts. Please wait."
-                else "Enter your master password to unlock this encrypted file vault.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-
-            // Vault File Selector / Switcher if existing vault files are present
-            if (selectedVaultName != null && availableVaults.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Box {
-                    OutlinedButton(onClick = { showVaultMenu = true }) {
-                        Icon(Icons.Default.FolderZip, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Vault File: $selectedVaultName.ofs")
-                    }
-
-                    DropdownMenu(
-                        expanded = showVaultMenu,
-                        onDismissRequest = { showVaultMenu = false }
-                    ) {
-                        availableVaults.forEach { vault ->
+                        DropdownMenu(
+                            expanded = showVaultMenu,
+                            onDismissRequest = { showVaultMenu = false }
+                        ) {
+                            availableVaults.forEach { vault ->
+                                DropdownMenuItem(
+                                    text = { Text("$vault.ofs") },
+                                    onClick = {
+                                        showVaultMenu = false
+                                        password = ""
+                                        onSelectVault(vault)
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
-                                text = { Text("$vault.ofs") },
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Create New Vault File")
+                                    }
+                                },
                                 onClick = {
                                     showVaultMenu = false
-                                    password = ""
-                                    onSelectVault(vault)
+                                    onCreateVaultRequested()
                                 }
                             )
                         }
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Create New Vault File")
-                                }
-                            },
-                            onClick = {
-                                showVaultMenu = false
-                                onCreateVaultRequested()
-                            }
-                        )
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Vault Master Password") },
-                singleLine = true,
-                enabled = !isLockedOut,
-                visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(
-                    onDone = { submitPassword() }
-                ),
-                trailingIcon = {
-                    IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                        Icon(
-                            imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = "Toggle password visibility"
-                        )
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester)
-            )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Vault Master Password") },
+                    singleLine = true,
+                    enabled = !isLockedOut,
+                    visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { submitPassword() }
+                    ),
+                    trailingIcon = {
+                        IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                            Icon(
+                                imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = "Toggle password visibility"
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(
-                onClick = submitPassword,
-                enabled = !isLockedOut && password.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Unlock Vault")
-            }
-
-            // Emergency Wipe Warning when approaching limit (>= 9 failed attempts)
-            if (failedAttempts >= 9 && 12 - failedAttempts > 0) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "WARNING: ${12 - failedAttempts} attempt(s) remaining before total vault wipe!",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
-            }
 
-            // Lockout Banner / Error Message
-            AnimatedVisibility(
-                visible = isLockedOut || errorMessage != null,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = if (isLockedOut) formatLockoutDuration(lockoutSeconds) else (errorMessage ?: ""),
-                    color = if (isLockedOut) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
+                Button(
+                    onClick = submitPassword,
+                    enabled = !isLockedOut && password.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Unlock Vault")
+                }
+
+                // Emergency Wipe Warning when approaching limit (>= 9 failed attempts)
+                if (failedAttempts >= 9 && 12 - failedAttempts > 0) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "WARNING: ${12 - failedAttempts} attempt(s) remaining before total vault wipe!",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                // Lockout Banner / Error Message
+                AnimatedVisibility(
+                    visible = isLockedOut || errorMessage != null,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = if (isLockedOut) formatLockoutDuration(lockoutSeconds) else (errorMessage ?: ""),
+                        color = if (isLockedOut) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
     }
@@ -574,7 +588,10 @@ fun CreateVaultDialog(
         onDismissRequest = onDismiss,
         title = { Text("Create Encrypted Vault File") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(
                     text = "Specify a name and password for the new single-file encrypted vault container.",
                     style = MaterialTheme.typography.bodySmall,
