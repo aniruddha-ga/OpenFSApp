@@ -52,6 +52,10 @@ class AuthManager(context: Context) {
     @Volatile
     var isPickingFile: Boolean = false
 
+    // Session-level flag to ensure shred confirmation warning pops up at most ONCE per session
+    @Volatile
+    var hasPromptedShredWarningInSession: Boolean = false
+
     // App Lock (UI) state - ALWAYS starts locked so App Lock Screen shows first!
     private val _isAppUnlocked = MutableStateFlow(false)
     val isAppUnlocked: StateFlow<Boolean> = _isAppUnlocked.asStateFlow()
@@ -447,7 +451,14 @@ class AuthManager(context: Context) {
         prefs.edit(commit = true) { putInt(PREF_AUTO_LOCK_TIMEOUT_MINUTES, minutes) }
     }
 
+    fun isShredAfterImportEnabled(): Boolean = prefs.getBoolean(PREF_SHRED_AFTER_IMPORT_ENABLED, false)
+
+    fun setShredAfterImportEnabled(enabled: Boolean) {
+        prefs.edit(commit = true) { putBoolean(PREF_SHRED_AFTER_IMPORT_ENABLED, enabled) }
+    }
+
     fun lock() {
+        hasPromptedShredWarningInSession = false
         if (isAppLockSetup()) {
             _isAppUnlocked.value = false
         } else {
@@ -470,5 +481,6 @@ class AuthManager(context: Context) {
         private const val PREF_FAILED_ATTEMPTS = "failed_attempts_count"
         private const val PREF_LOCKOUT_UNTIL_MS = "lockout_until_ms"
         private const val PREF_AUTO_LOCK_TIMEOUT_MINUTES = "auto_lock_timeout_minutes"
+        private const val PREF_SHRED_AFTER_IMPORT_ENABLED = "shred_after_import_enabled"
     }
 }

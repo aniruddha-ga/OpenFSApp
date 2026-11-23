@@ -98,7 +98,6 @@ class RamDecryptedMediaDataSource(
             randomAccessFile.readFully(meta)
             val metaBuffer = ByteBuffer.wrap(meta)
             val index = metaBuffer.int
-            val plaintextSize = metaBuffer.int
             val ciphertextSize = metaBuffer.int
 
             val cipherText = ByteArray(ciphertextSize)

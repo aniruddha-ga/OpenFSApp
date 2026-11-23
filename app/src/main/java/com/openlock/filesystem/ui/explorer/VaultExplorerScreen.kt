@@ -171,6 +171,7 @@ fun VaultExplorerScreen(
     var selectedExportItem by remember { mutableStateOf<VaultItemEntity?>(null) }
     var itemToRename by remember { mutableStateOf<VaultItemEntity?>(null) }
     var itemToDelete by remember { mutableStateOf<VaultItemEntity?>(null) }
+    var pendingShredConfirmationUris by remember { mutableStateOf<List<Uri>?>(null) }
 
     // Required Storage & Media permissions for current Android SDK version
     val requiredPermissions = remember {
@@ -192,7 +193,7 @@ fun VaultExplorerScreen(
         }
     }
 
-    fun processSelectedUris(uris: List<Uri>) {
+    fun executeFileImport(uris: List<Uri>, shredSource: Boolean) {
         if (uris.isEmpty()) {
             Toast.makeText(context, "No file selected", Toast.LENGTH_SHORT).show()
             return
@@ -201,13 +202,13 @@ fun VaultExplorerScreen(
         Toast.makeText(context, "Selected ${uris.size} file(s). Starting import...", Toast.LENGTH_SHORT).show()
         isImporting = true
 
-        // Execute import on IO scope so it is NOT cancelled when Activity resumes from File Picker
+        // Execute import on IO scope so it is NOT canceled when Activity resumes from File Picker
         CoroutineScope(Dispatchers.IO).launch {
             var successCount = 0
             val errors = mutableListOf<String>()
 
             if (uris.size > 1) {
-                val (succ, fail) = vaultRepository.importFiles(uris, currentFolderId, masterKey)
+                val (succ, fail) = vaultRepository.importFiles(uris, currentFolderId, masterKey, shredSource = shredSource)
                 successCount = succ
                 if (fail > 0) {
                     errors.add("$fail file(s) failed during batch import.")
@@ -216,13 +217,14 @@ fun VaultExplorerScreen(
                 for (uri in uris) {
                     try {
                         Log.d("VaultImport", "Starting import for URI: $uri")
-                        val importedItem = vaultRepository.importFile(uri, currentFolderId, masterKey)
+                        val importedItem = vaultRepository.importFile(uri, currentFolderId, masterKey, shredSource = shredSource)
                         successCount++
                         Log.d("VaultImport", "Successfully imported file: ${importedItem.name} (id: ${importedItem.id})")
                         withContext(Dispatchers.Main) {
                             Toast.makeText(
                                 context,
-                                "Successfully imported '${importedItem.name}' (${formatFileSize(importedItem.sizeBytes)})",
+                                "Successfully imported '${importedItem.name}' (${formatFileSize(importedItem.sizeBytes)})" +
+                                        if (shredSource) " (source shredded)" else "",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -239,14 +241,27 @@ fun VaultExplorerScreen(
 
             withContext(Dispatchers.Main) {
                 isImporting = false
+                val shredText = if (shredSource) " & shredded source" else ""
                 if (errors.isEmpty()) {
-                    snackbarHostState.showSnackbar("Successfully imported $successCount file(s)")
+                    snackbarHostState.showSnackbar("Successfully imported$shredText $successCount file(s)")
                 } else {
                     snackbarHostState.showSnackbar(
                         "Import finished: $successCount succeeded, ${errors.size} failed. Check Toast for details."
                     )
                 }
             }
+        }
+    }
+
+    fun processSelectedUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val shredEnabled = authManager?.isShredAfterImportEnabled() ?: false
+        val alreadyPrompted = authManager?.hasPromptedShredWarningInSession ?: false
+
+        if (shredEnabled && !alreadyPrompted) {
+            pendingShredConfirmationUris = uris
+        } else {
+            executeFileImport(uris, shredSource = shredEnabled)
         }
     }
 
@@ -694,6 +709,45 @@ fun VaultExplorerScreen(
             dismissButton = {
                 TextButton(onClick = { itemToDelete = null }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Shred Source File Confirmation Dialog
+    pendingShredConfirmationUris?.let { uris ->
+        AlertDialog(
+            onDismissRequest = { pendingShredConfirmationUris = null },
+            title = { Text("Confirm Source File Shredding") },
+            text = {
+                Text(
+                    "The 'Shred Source File After Import' setting is currently enabled.\n\n" +
+                    "After successful import into the encrypted vault, the original source file(s) on your device storage will be permanently shredded and deleted.\n\n" +
+                    "Do you want to proceed with shredding original files?"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingShredConfirmationUris = null
+                        authManager?.setShredAfterImportEnabled(true)
+                        authManager?.hasPromptedShredWarningInSession = true
+                        executeFileImport(uris, shredSource = true)
+                    }
+                ) {
+                    Text("Yes, Shred Original", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        pendingShredConfirmationUris = null
+                        authManager?.setShredAfterImportEnabled(false)
+                        authManager?.hasPromptedShredWarningInSession = true
+                        executeFileImport(uris, shredSource = false)
+                    }
+                ) {
+                    Text("No, Keep Original & Disable Shred")
                 }
             }
         )

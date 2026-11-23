@@ -109,7 +109,12 @@ class VaultRepository(
         vaultDao.getItemById(itemId)
     }
 
-    suspend fun importFile(uri: Uri, parentFolderId: String?, masterKey: SecretKey): VaultItemEntity {
+    suspend fun importFile(
+        uri: Uri,
+        parentFolderId: String?,
+        masterKey: SecretKey,
+        shredSource: Boolean = false
+    ): VaultItemEntity {
         return withContext(Dispatchers.IO) {
             val fileName = getFileNameFromUri(uri)?.takeIf { it.isNotBlank() } ?: "imported_file_${System.currentTimeMillis()}"
             val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
@@ -165,6 +170,11 @@ class VaultRepository(
                 vaultDao.insertItem(itemEntity)
                 Log.d("VaultSQL", "File inserted successfully into Room DB: ${itemEntity.id}")
                 containerManager.syncContainerState()
+
+                if (shredSource) {
+                    shredAndDeleteSourceUri(context, uri)
+                }
+
                 itemEntity
             } catch (e: Exception) {
                 if (tempFile.exists()) tempFile.delete()
@@ -175,12 +185,90 @@ class VaultRepository(
         }
     }
 
-    suspend fun importFiles(uris: List<Uri>, parentFolderId: String?, masterKey: SecretKey): Pair<Int, Int> {
+    private fun shredAndDeleteSourceUri(context: Context, uri: Uri) {
+        try {
+            try {
+                var fileSize: Long = -1L
+                if (uri.scheme == "content") {
+                    context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
+                                fileSize = cursor.getLong(sizeIndex)
+                            }
+                        }
+                    }
+                }
+
+                if (uri.scheme == "file" && uri.path != null) {
+                    val file = File(uri.path!!)
+                    if (file.exists() && file.isFile) {
+                        fileSize = file.length()
+                        java.io.RandomAccessFile(file, "rws").use { raf ->
+                            val buffer = ByteArray(64 * 1024)
+                            var remaining = fileSize
+                            while (remaining > 0) {
+                                val toWrite = minOf(buffer.size.toLong(), remaining).toInt()
+                                raf.write(buffer, 0, toWrite)
+                                remaining -= toWrite
+                            }
+                            raf.fd.sync()
+                        }
+                        file.delete()
+                        return
+                    }
+                } else {
+                    context.contentResolver.openOutputStream(uri, "rwt")?.use { outStream ->
+                        val buffer = ByteArray(64 * 1024)
+                        if (fileSize > 0) {
+                            var remaining = fileSize
+                            while (remaining > 0) {
+                                val toWrite = minOf(buffer.size.toLong(), remaining).toInt()
+                                outStream.write(buffer, 0, toWrite)
+                                remaining -= toWrite
+                            }
+                        } else {
+                            outStream.write(buffer)
+                        }
+                        outStream.flush()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("VaultRepository", "Could not overwrite source file before deletion: ${e.message}")
+            }
+
+            var deleted = false
+            if (DocumentFile.isDocumentUri(context, uri)) {
+                deleted = android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+            }
+            if (!deleted) {
+                val docFile = DocumentFile.fromSingleUri(context, uri)
+                if (docFile != null && docFile.exists()) {
+                    deleted = docFile.delete()
+                }
+            }
+            if (!deleted) {
+                try {
+                    context.contentResolver.delete(uri, null, null)
+                } catch (_: Exception) {}
+            }
+            Log.d("VaultRepository", "Shred source URI result for $uri: deleted=$deleted")
+        } catch (e: Exception) {
+            Log.e("VaultRepository", "Failed to shred/delete source file: $uri", e)
+        }
+    }
+
+    suspend fun importFiles(
+        uris: List<Uri>,
+        parentFolderId: String?,
+        masterKey: SecretKey,
+        shredSource: Boolean = false
+    ): Pair<Int, Int> {
         var successCount = 0
         var failCount = 0
         for (uri in uris) {
             try {
-                importFile(uri, parentFolderId, masterKey)
+                importFile(uri, parentFolderId, masterKey, shredSource = shredSource)
                 successCount++
             } catch (e: Exception) {
                 e.printStackTrace()

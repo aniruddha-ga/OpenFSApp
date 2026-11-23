@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockReset
@@ -85,6 +86,7 @@ fun SettingsScreen(
     val selectedVaultName by authManager.selectedVaultName.collectAsState()
 
     var isAutoSyncChecked by remember { mutableStateOf(authManager.isAutoSyncEnabled(selectedVaultName)) }
+    var isShredAfterImportChecked by remember { mutableStateOf(authManager.isShredAfterImportEnabled()) }
     var showOverwriteWarningDialog by remember { mutableStateOf(false) }
 
     var showChangeAppLockDialog by remember { mutableStateOf(false) }
@@ -369,6 +371,41 @@ fun SettingsScreen(
                         Icon(Icons.Default.CloudUpload, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Restore Container from File")
+                    }
+                }
+            }
+
+            // File Import Security / Shred Options
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Shred Source File After Import", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (isShredAfterImportChecked) "Original files are shredded & deleted after file import"
+                                    else "Original files remain in storage after import (Default)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isShredAfterImportChecked,
+                            onCheckedChange = { enable ->
+                                isShredAfterImportChecked = enable
+                                authManager.setShredAfterImportEnabled(enable)
+                            }
+                        )
                     }
                 }
             }

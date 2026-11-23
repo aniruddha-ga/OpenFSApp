@@ -4,7 +4,6 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
-import android.os.Build
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -32,8 +31,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
@@ -144,10 +143,10 @@ fun FilePreviewScreen(
                     stream.use { inputStream ->
                         val bytes = inputStream.readBytes()
                         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        if (bitmap != null) {
-                            previewState = PreviewContent.ImagePreview(bitmap)
+                        previewState = if (bitmap != null) {
+                            PreviewContent.ImagePreview(bitmap)
                         } else {
-                            previewState = PreviewContent.Fallback(mimeType)
+                            PreviewContent.Fallback(mimeType)
                         }
                     }
                 } else if (isText) {
@@ -169,10 +168,10 @@ fun FilePreviewScreen(
                     val physicalFile = vaultRepository.getPhysicalFile(itemId)
                     if (physicalFile != null) {
                         val dataSource = RamDecryptedMediaDataSource(physicalFile, masterKey)
-                        if (isAudio) {
-                            previewState = PreviewContent.AudioPreview(dataSource)
+                        previewState = if (isAudio) {
+                            PreviewContent.AudioPreview(dataSource)
                         } else {
-                            previewState = PreviewContent.VideoPreview(dataSource)
+                            PreviewContent.VideoPreview(dataSource)
                         }
                     } else {
                         previewState = PreviewContent.Error("Encrypted media file not found in storage.")
@@ -251,7 +250,7 @@ fun FilePreviewScreen(
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                imageVector = Icons.Default.InsertDriveFile,
+                                imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
                                 contentDescription = null,
                                 modifier = Modifier.size(64.dp),
                                 tint = MaterialTheme.colorScheme.primary
@@ -516,11 +515,7 @@ private fun VideoPlayerView(dataSource: RamDecryptedMediaDataSource) {
 
     fun seekToFrame(player: MediaPlayer, targetMs: Int) {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                player.seekTo(targetMs.toLong(), MediaPlayer.SEEK_CLOSEST)
-            } else {
-                player.seekTo(targetMs)
-            }
+            player.seekTo(targetMs.toLong(), MediaPlayer.SEEK_CLOSEST)
         } catch (e: Exception) {
             Log.e("VideoPlayerView", "Error seeking to frame $targetMs", e)
         }
